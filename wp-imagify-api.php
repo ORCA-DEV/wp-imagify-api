@@ -6,7 +6,7 @@
  */
 
 /*
- * Plugin Name: WP Imagify API
+ * Plugin Name: Imagify API
  * Plugin URI: https://github.com/wp-api-libraries/wp-imagify-api
  * Description: Perform API requests to Imagify in WordPress.
  * Author: WP API Libraries
@@ -24,14 +24,14 @@ if ( ! class_exists( 'WpImagifyBase' ) ) {
 }
 
 /* Check if class exists. */
-if ( class_exists( 'ImagifyAPI' ) {
+if ( class_exists( 'ImagifyAPI' ) ){
 	return;
 }
 
 /**
  * Imagify.io API for WordPress.
  */
-class Imagify extends WpImagifyBase {
+class ImagifyAPI extends WpImagifyBase {
 
 	/**
 	 * The Imagify API endpoint.
@@ -65,7 +65,7 @@ class Imagify extends WpImagifyBase {
 	/**
 	 * The constructor.
 	 */
-	protected function __construct( $api_key = null ) {
+	public function __construct( $api_key = null ) {
 
 		if( null === $api_key){
 			// Check if the WordPress plugin is activated and the API key is stored in the options.
@@ -86,10 +86,10 @@ class Imagify extends WpImagifyBase {
 	}
 
 	protected function set_headers(){
-		$this->argrs['headers'] = array(
-			'Accept'        => 'Accept: application/json',
-			'Content-Type'  => 'Content-Type: application/json',
-			'Authorization' => 'Authorization: token ' . $this->api_key
+		$this->args['headers'] = array(
+			'Accept'        => 'application/json',
+			'Content-Type'  => 'application/json',
+			'Authorization' => 'token ' . $this->api_key
 		);
 	}
 
@@ -371,43 +371,30 @@ class Imagify extends WpImagifyBase {
 	/**
 	 * Check your Imagify API key status.
 	 *
+	 * Includes a really cheap caching (gets deleted across reinstantiation.
+	 *
 	 * @access public
 	 * @since  1.6.5
 	 *
-	 * @param  string $data The license key.
+	 * @param  string $test_api_key The api key to test.
 	 * @return object
 	 */
-	public function get_status( $data ) {
+	public function get_status( $test_api_key ) {
 		static $status = array();
 
-		if ( isset( $status[ $data ] ) ) {
-			return $status[ $data ];
+		if ( isset( $status[$test_api_key] ) ) {
+			return $status[$test_api_key];
 		}
 
 		$partner = imagify_get_partner();
 
-		$this->build_request( 'status', 'partner' => $partner );
+		$this->build_request( 'status', array( 'partner' => $partner ) );
 
-		$this->args['headers']['Authorization'] = 'Authorization: token ' . $data;
+		$this->args['headers']['Authorization'] = 'token ' . $test_api_key;
 
-		return $this->fetch();
+		$status[$test_api_key] = $this->fetch();
 
-		$this->headers = array(
-			'Authorization' => 'Authorization: token ' . $data,
-		);
-
-		$uri     = 'status/';
-
-
-		if ( $partner ) {
-			$uri .= '?partner=' . $partner;
-		}
-
-		$status[ $data ] = $this->http_call( $uri, array(
-			'timeout' => 10,
-		) );
-
-		return $status[ $data ];
+		return $status[$test_api_key];
 	}
 
 	/**
@@ -419,19 +406,10 @@ class Imagify extends WpImagifyBase {
 	 * @return object
 	 */
 	public function get_api_version() {
-
-		return $this->run( 'version' );
-
 		static $api_version;
 
 		if ( ! isset( $api_version ) ) {
-			$this->headers = array(
-				'Authorization' => $this->all_headers['Authorization'],
-			);
-
-			$api_version = $this->http_call( 'version/', array(
-				'timeout' => 5,
-			) );
+			$api_version = $this->run( 'version' );
 		}
 
 		return $api_version;
@@ -446,36 +424,108 @@ class Imagify extends WpImagifyBase {
 	 * @return object
 	 */
 	public function get_public_info() {
-
 		return $this->run( 'public-info' );
-
-		$this->headers = $this->all_headers;
-
-		return $this->http_call( 'public-info' );
 	}
 
 	/**
 	 * Optimize an image from its binary content.
 	 *
-	 * @access public
-	 * @since 1.6.5
-	 * @since 1.6.7 $data['image'] can contain the file path (prefered) or the result of `curl_file_create()`.
+	 * Untested.
 	 *
-	 * @param  string $data All options.
-	 * @return object
+	 * @param  string $image   Image path
+	 * @param  array  $options (optional) Optimization options
+	 *                         array(
+	 *                             'level'     => string ('normal' | 'aggressive' (default) | 'ultra'),
+	 *                             'resize'    => array(
+	 *                                 'width'   => int,
+	 *                                 'height'  => int,
+	 *                                 'percent' => int
+	 *                             ),
+	 *                             'keep_exif' => bool (default: false)
+	 *                         )
+	 * @return array
 	 */
 	public function upload_image( $data ) {
-
-		return $this->run( 'upload', $data, 'POST' );
-
-		$this->headers = array(
-			'Authorization' => $this->all_headers['Authorization'],
+		if ( !is_string($image) || !is_file($image) ) {
+			return (object) array('success' => false, 'message' => 'Image incorrect!');
+		} else if ( !is_readable($image) ) {
+			return (object) array('success' => false, 'message' => 'Image not readable!');
+		}
+		$default = array(
+			'level'     => 'aggressive',
+			'resize'    => array(),
+			'keep_exif' => false,
+			'timeout'   => 45
 		);
+		$options = array_merge( $default, $options );
 
-		return $this->http_call( 'upload/', array(
-			'method'    => 'POST',
+		$data = array(
+			'image' => curl_file_create( $image ),
+			'data'  => json_encode(
+				array(
+					'aggressive' => ( 'aggressive' === $options['level'] ) ? true : false,
+					'ultra'      => ( 'ultra' === $options['level'] ) ? true : false,
+					'resize'     => $options['resize'],
+					'keep_exif'  => $options['keep_exif'],
+				)
+			)
+		);
+		return $this->curl_request( array(
 			'post_data' => $data,
+			'timeout'   => $options["timeout"]
 		));
+	}
+
+	/**
+	 * Make an HTTP call using curl.
+	 *
+	 * @param  string $url       The URL to call
+	 * @param  array  $options   Optional request options
+	 * @return object
+	 */
+	private function curl_request( $options = array() ) {
+		$url = '/upload/';
+		$default = array(
+			'method'    => 'POST',
+			'post_data' => null
+		);
+		$options = array_merge( $default, $options );
+
+		$this->build_request(); // Set headers.
+		try {
+			$ch     = curl_init();
+			$is_ssl = ( isset( $_SERVER['HTTPS'] ) && ( 'on' == strtolower( $_SERVER['HTTPS'] ) || '1' == $_SERVER['HTTPS'] ) ) || ( isset( $_SERVER['SERVER_PORT'] ) && ( '443' == $_SERVER['SERVER_PORT'] ) );
+			if ( 'POST' === $options['method'] ) {
+				curl_setopt( $ch, CURLOPT_POST, true );
+				curl_setopt( $ch, CURLOPT_POSTFIELDS, $options['post_data'] );
+			}
+			curl_setopt( $ch, CURLOPT_URL, self::API_ENDPOINT . $url );
+			curl_setopt( $ch, CURLOPT_USERAGENT, 'Imagify PHP Class');
+			curl_setopt( $ch, CURLOPT_RETURNTRANSFER, true );
+			curl_setopt( $ch, CURLOPT_HTTPHEADER, $this->args['headers'] );
+			curl_setopt( $ch, CURLOPT_TIMEOUT, $options['timeout'] );
+			@curl_setopt( $ch, CURLOPT_FOLLOWLOCATION, true );
+			curl_setopt( $ch, CURLOPT_SSL_VERIFYPEER, $is_ssl );
+
+			$response  = json_decode( curl_exec( $ch ) );
+			$error     = curl_error( $ch );
+			$http_code = curl_getinfo( $ch, CURLINFO_HTTP_CODE );
+			curl_close( $ch );
+		} catch( \Exception $e ) {
+			$this->clear();
+			return (object) array('success' => false, 'message' => 'Unknown error occurred');
+		}
+
+		if ( 200 !== $http_code && isset( $response->code, $response->detail ) ) {
+			$this->clear();
+			return $response;
+		} elseif ( 200 !== $http_code ) {
+			$this->clear();
+			return (object) array('success' => false, 'message' => 'Unknown error occurred');
+		}
+
+		$this->clear();
+		return $response;
 	}
 
 	/**
@@ -484,11 +534,10 @@ class Imagify extends WpImagifyBase {
 	 * @access public
 	 * @since  1.6.5
 	 *
-	 * @param  string $data All options. Details here: --.
+	 * @param  string $data All options. Details here: --. 					<-- Thanks imagify.
 	 * @return object
 	 */
 	public function fetch_image( $data ) {
-
 		return $this->run( 'fetch', $data, 'POST' );
 
 		$this->headers = $this->all_headers;
@@ -508,12 +557,7 @@ class Imagify extends WpImagifyBase {
 	 * @return object
 	 */
 	public function get_plans_prices() {
-
 		return $this->run( 'pricing/plan' );
-
-		$this->headers = $this->all_headers;
-
-		return $this->http_call( 'pricing/plan/' );
 	}
 
 	/**
@@ -525,12 +569,7 @@ class Imagify extends WpImagifyBase {
 	 * @return object
 	 */
 	public function get_packs_prices() {
-
 		return $this->run( 'pricing/pack' );
-
-		$this->headers = $this->all_headers;
-
-		return $this->http_call( 'pricing/pack/' );
 	}
 
 	/**
@@ -542,12 +581,7 @@ class Imagify extends WpImagifyBase {
 	 * @return object
 	 */
 	public function get_all_prices() {
-
 		return $this->run( 'pricing/all' );
-
-		$this->headers = $this->all_headers;
-
-		return $this->http_call( 'pricing/all/' );
 	}
 
 	/**
@@ -560,12 +594,7 @@ class Imagify extends WpImagifyBase {
 	 * @return object
 	 */
 	public function check_coupon_code( $coupon ) {
-
 		return $this->run( 'coupons/'.$coupon );
-
-		$this->headers = $this->all_headers;
-
-		return $this->http_call( 'coupons/' . $coupon . '/' );
 	}
 
 	/**
@@ -577,13 +606,6 @@ class Imagify extends WpImagifyBase {
 	 * @return object
 	 */
 	public function check_discount() {
-
 		return $this->run( 'pricing/discount' );
-
-		$this->headers = $this->all_headers;
-
-		return $this->http_call( 'pricing/discount/' );
 	}
-
-
 }
